@@ -299,6 +299,52 @@ if arquivo is not None:
                     "informado na planilha."
                 )
 
+                # Resumo das divergências financeiras
+                quantidade_divergencias = int(divergencias.sum())
+
+                total_vendas = len(dados)
+
+                diferenca_absoluta_total = (
+                    dados.loc[divergencias, "Faturamento"]
+                    - faturamento_calculado.loc[divergencias]
+                ).abs().sum()
+
+                st.subheader("📊 Resumo das Divergências")
+
+                col_div1, col_div2, col_div3, col_div4 = st.columns(4)
+
+                with col_div1:
+                    st.metric(
+                        "Vendas com Divergências",
+                        quantidade_divergencias
+                    )
+
+                with col_div2:
+                    st.metric(
+                        "Diferença Absoluta Total",
+                        formatar_reais(diferenca_absoluta_total)
+                    )
+
+                with col_div3:
+                    st.metric(
+                        "Vendas Analisadas",
+                        total_vendas
+                    )
+                
+                # Percentual de vendas com divergências
+                percentual_divergencias = (
+                    quantidade_divergencias / total_vendas * 100
+                    if total_vendas > 0
+                    else 0
+                )
+
+                with col_div4:
+                    st.metric(
+                        "Percentual de Divergências",
+                        f"{percentual_divergencias:.1f}%".replace(".", ",")
+                    )
+
+
                 
                 # Incluir identificação da venda quando disponível
                 colunas_relatorio = [
@@ -396,6 +442,92 @@ if arquivo is not None:
                     
                 )
 
+
+                # Exportar divergências em Excel
+                from io import BytesIO
+
+                arquivo_divergencias = BytesIO()
+
+                
+                with pd.ExcelWriter(
+                    arquivo_divergencias,
+                    engine="openpyxl"
+                ) as writer:
+
+                    relatorio_divergencias.to_excel(
+                        writer,
+                        index=False,
+                        sheet_name="Divergencias"
+                    )
+
+                    planilha = writer.sheets["Divergencias"]
+
+                    from openpyxl.styles import Font, PatternFill, Alignment
+                    from openpyxl.utils import get_column_letter
+
+                    # Destacar cabeçalhos
+                    for celula in planilha[1]:
+                        celula.font = Font(
+                            bold=True,
+                            color="FFFFFF"
+                        )
+                        celula.fill = PatternFill(
+                            start_color="17365D",
+                            end_color="17365D",
+                            fill_type="solid"
+                        )
+                        celula.alignment = Alignment(
+                            horizontal="center"
+                        )
+
+                    # Ajustar largura das colunas
+                    for coluna in planilha.columns:
+                        maior_tamanho = max(
+                            len(str(celula.value))
+                            if celula.value is not None else 0
+                            for celula in coluna
+                        )
+
+                        letra = get_column_letter(coluna[0].column)
+
+                        planilha.column_dimensions[letra].width = min(
+                            maior_tamanho + 4,
+                            40
+                        )
+
+                    # Formatar valores monetários
+                    colunas_monetarias_excel = [
+                        "Preço Unitário",
+                        "Valor Informado",
+                        "Valor Calculado",
+                        "Diferença"
+                    ]
+
+                    for indice, celula in enumerate(planilha[1], start=1):
+                        if celula.value in colunas_monetarias_excel:
+                            for linha in range(2, planilha.max_row + 1):
+                                planilha.cell(
+                                    row=linha,
+                                    column=indice
+                                ).number_format = '"R$" #,##0.00'
+
+                    # Manter cabeçalho visível ao rolar
+                    planilha.freeze_panes = "A2"
+
+                    # Habilitar filtros
+                    planilha.auto_filter.ref = planilha.dimensions
+
+
+                st.download_button(
+                    label="📥 Baixar Relatório de Divergências",
+                    data=arquivo_divergencias.getvalue(),
+                    file_name="relatorio_divergencias.xlsx",
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "spreadsheetml.sheet"
+                    ),
+                    key="download_divergencias"
+                )
 
     else:
         # Calcular quando não existe faturamento informado
