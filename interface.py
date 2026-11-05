@@ -81,6 +81,10 @@ if arquivo is not None:
         
         # Limpar a escolha do identificador ao trocar de planilha
         st.session_state.pop("identificador_transacao", None)
+        
+        # Reiniciar tratamento de duplicações ao trocar de planilha
+        st.session_state.pop("tratar_duplicados", None)
+
 
 
         # Reiniciar a seleção das colunas
@@ -221,6 +225,50 @@ if arquivo is not None:
 
     st.subheader("Visualização dos dados")
     st.dataframe(dados, use_container_width=True)
+    
+    # Verificar registros completamente duplicados
+    quantidade_duplicados = int(dados.duplicated().sum())
+
+    if quantidade_duplicados > 0:
+        st.warning(
+            f"Foram encontrados {quantidade_duplicados} "
+            "registros completamente duplicados na planilha."
+        )
+
+        registros_duplicados = dados[
+            dados.duplicated(keep=False)
+        ]
+
+        with st.expander("🔎 Visualizar registros duplicados"):
+            st.dataframe(
+                registros_duplicados,
+                use_container_width=True
+            )
+    else:
+        st.success(
+            "Nenhum registro completamente duplicado foi encontrado."
+        )
+
+        
+    # Permitir tratamento opcional de registros duplicados
+    if quantidade_duplicados > 0:
+
+        tratar_duplicados = st.checkbox(
+            "Desconsiderar registros completamente duplicados nos cálculos",
+            value=False,
+            key="tratar_duplicados"
+        )
+
+        if tratar_duplicados:
+            dados = dados.drop_duplicates().copy()
+
+            st.info(
+                f"{quantidade_duplicados} registros duplicados "
+                "foram desconsiderados nesta análise. "
+                "A planilha original não foi modificada."
+            )
+
+
 
 
     # Validar dados necessários para os cálculos
