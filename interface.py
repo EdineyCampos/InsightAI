@@ -226,6 +226,35 @@ if arquivo is not None:
     st.subheader("Visualização dos dados")
     st.dataframe(dados, use_container_width=True)
     
+    # Identificar valores ausentes na planilha
+    valores_ausentes = dados.isna().sum()
+
+    colunas_com_ausencias = valores_ausentes[
+        valores_ausentes > 0
+    ]
+
+    if not colunas_com_ausencias.empty:
+        st.warning(
+            "Foram encontrados valores ausentes na planilha. "
+            "Confira as colunas afetadas antes de continuar."
+        )
+
+        resumo_ausencias = colunas_com_ausencias.reset_index()
+        resumo_ausencias.columns = [
+            "Coluna",
+            "Valores Ausentes"
+        ]
+
+        with st.expander("🔎 Visualizar valores ausentes"):
+            st.dataframe(
+                resumo_ausencias,
+                use_container_width=True
+            )
+    else:
+        st.success(
+            "Nenhum valor ausente foi encontrado na planilha."
+        )
+
     # Verificar registros completamente duplicados
     quantidade_duplicados = int(dados.duplicated().sum())
 
@@ -278,6 +307,7 @@ if arquivo is not None:
 
    
     
+    
     # Validar quantidade e os campos financeiros disponíveis
     colunas_numericas = ["Quantidade"]
 
@@ -287,8 +317,11 @@ if arquivo is not None:
     if tem_faturamento:
         colunas_numericas.append("Faturamento")
 
+    erros_financeiros = []
+
     for coluna in colunas_numericas:
 
+        # Converter os valores para números
         if coluna in ["Preco", "Faturamento"]:
             dados[coluna] = dados[coluna].apply(converter_preco)
         else:
@@ -299,19 +332,29 @@ if arquivo is not None:
 
         nome_exibido = "Preço" if coluna == "Preco" else coluna
 
+        # Verificar valores ausentes ou inválidos
         if dados[coluna].isna().any():
-            st.error(
+            erros_financeiros.append(
                 f"A coluna {nome_exibido} contém valores vazios "
                 "ou que não são números válidos."
             )
-            st.stop()
 
+        # Verificar valores negativos
         if (dados[coluna] < 0).any():
-            st.error(
-                f"A coluna {nome_exibido} contém valores negativos. "
-                "Verifique os dados antes de continuar."
+            erros_financeiros.append(
+                f"A coluna {nome_exibido} contém valores negativos."
             )
-            st.stop()
+
+    # Mostrar todos os erros encontrados
+    if erros_financeiros:
+        st.error(
+            "Foram encontrados problemas nos dados financeiros:"
+        )
+
+        for erro in erros_financeiros:
+            st.error(erro)
+
+        st.stop()
 
 
     if dados["Quantidade"].sum() == 0:
