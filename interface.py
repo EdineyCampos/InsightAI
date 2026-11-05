@@ -308,6 +308,25 @@ if arquivo is not None:
                     dados.loc[divergencias, "Faturamento"]
                     - faturamento_calculado.loc[divergencias]
                 ).abs().sum()
+                
+                # Separar divergências positivas e negativas
+                diferencas_financeiras = (
+                    dados.loc[divergencias, "Faturamento"]
+                    - faturamento_calculado.loc[divergencias]
+                )
+
+                total_acima = (
+                    diferencas_financeiras[
+                        diferencas_financeiras > 0
+                    ].sum()
+                )
+
+                total_abaixo = abs(
+                    diferencas_financeiras[
+                        diferencas_financeiras < 0
+                    ].sum()
+                )
+
 
                 st.subheader("📊 Resumo das Divergências")
 
@@ -343,6 +362,23 @@ if arquivo is not None:
                         "Percentual de Divergências",
                         f"{percentual_divergencias:.1f}%".replace(".", ",")
                     )
+
+                    
+                # Indicadores por direção da divergência
+                col_acima, col_abaixo = st.columns(2)
+
+                with col_acima:
+                    st.metric(
+                        "📈 Valores Acima do Esperado",
+                        formatar_reais(total_acima)
+                    )
+
+                with col_abaixo:
+                    st.metric(
+                        "📉 Valores Abaixo do Esperado",
+                        formatar_reais(total_abaixo)
+                    )
+
 
 
                 
