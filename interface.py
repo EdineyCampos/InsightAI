@@ -78,6 +78,10 @@ if arquivo is not None:
         st.session_state["arquivo_anterior"] = arquivo.getvalue()
         st.session_state.pop("analise_ia", None)
         st.session_state.pop("sugestoes_colunas_ia", None)
+        
+        # Limpar a escolha do identificador ao trocar de planilha
+        st.session_state.pop("identificador_transacao", None)
+
 
         # Reiniciar a seleção das colunas
         for campo in ["Produto", "Quantidade", "Preco", "Faturamento"]:
@@ -307,12 +311,43 @@ if arquivo is not None:
                     dados.columns.tolist()
                 )
 
+               
                 coluna_id = reconhecimento_id["identificadas"].get(
                     "ID_Venda"
                 )
 
+                # Identificar possíveis colunas de transações ambíguas
+                from inteligencia_planilhas import normalizar_nome, SINONIMOS
+
+                nomes_id = {
+                    normalizar_nome(nome)
+                    for nome in SINONIMOS["ID_Venda"]
+                }
+
+                candidatas_id = [
+                    coluna
+                    for coluna in dados.columns
+                    if normalizar_nome(coluna) in nomes_id
+                ]
+
+                if len(candidatas_id) > 1:
+                    st.warning(
+                        "Foram encontradas várias colunas que podem "
+                        "identificar uma venda. Escolha a correta."
+                    )
+
+                    coluna_id = st.selectbox(
+                        "Identificador da transação",
+                        options=candidatas_id,
+                        key="identificador_transacao"
+                    )
+
+                elif len(candidatas_id) == 1:
+                    coluna_id = candidatas_id[0]
+
                 if coluna_id is not None:
                     colunas_relatorio.insert(0, coluna_id)
+
 
 
                 relatorio_divergencias = dados.loc[

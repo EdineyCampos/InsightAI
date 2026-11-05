@@ -64,6 +64,7 @@ def identificar_colunas(colunas):
     identificadas = {}
     ambiguas = []
     desconhecidas = []
+    campos_duplicados = set()
 
     sinonimos_normalizados = {
         campo: {normalizar_nome(nome) for nome in nomes}
@@ -83,16 +84,35 @@ def identificar_colunas(colunas):
             if nome in nomes
         ]
 
+        
         if len(campos) == 1:
             campo = campos[0]
+
             if campo in identificadas:
-                ambiguas.append(coluna)
+                # Duas colunas representam o mesmo campo
+                coluna_anterior = identificadas.pop(campo)
+                campos_duplicados.add(campo)
+
+                if coluna_anterior not in ambiguas:
+                    ambiguas.append(coluna_anterior)
+
+                if coluna not in ambiguas:
+                    ambiguas.append(coluna)
+
+            elif campo in campos_duplicados:
+                # Outras colunas do mesmo campo continuam ambíguas
+                if coluna not in ambiguas:
+                    ambiguas.append(coluna)
+
             else:
                 identificadas[campo] = coluna
+
         elif len(campos) > 1:
             ambiguas.append(coluna)
+
         else:
             desconhecidas.append(coluna)
+    
 
     return {
         "identificadas": identificadas,
