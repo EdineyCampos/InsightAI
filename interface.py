@@ -80,7 +80,7 @@ if arquivo is not None:
         st.session_state.pop("sugestoes_colunas_ia", None)
 
         # Reiniciar a seleção das colunas
-        for campo in ["Produto", "Quantidade", "Preco"]:
+        for campo in ["Produto", "Quantidade", "Preco", "Faturamento"]:
             st.session_state.pop(f"mapeamento_{campo}", None)
 
     # Identificar colunas conhecidas
@@ -101,7 +101,7 @@ if arquivo is not None:
                 )
                 
                 # Reiniciar os seletores para aplicar as sugestões
-                for campo in ["Produto", "Quantidade", "Preco"]:
+                for campo in ["Produto", "Quantidade", "Preco", "Faturamento"]:
                     st.session_state.pop(
                         f"mapeamento_{campo}", None
                     )
@@ -122,7 +122,7 @@ if arquivo is not None:
         "que os cálculos das vendas estejam corretos."
     )
 
-    campos = ["Produto", "Quantidade", "Preco"]
+    campos = ["Produto", "Quantidade", "Preco", "Faturamento"]
     opcoes = ["Selecione uma coluna"] + dados.columns.tolist()
 
     mapeamento = {}
@@ -159,23 +159,58 @@ if arquivo is not None:
             key=f"mapeamento_{campo}"
         )
 
-    # Verificar se todos os campos foram selecionados
-    if "Selecione uma coluna" in mapeamento.values():
-        st.warning("Selecione todas as colunas necessárias.")
+    
+    # Verificar os campos obrigatórios
+    obrigatorios = ["Produto", "Quantidade"]
+
+    if any(
+        mapeamento[campo] == "Selecione uma coluna"
+        for campo in obrigatorios
+    ):
+        st.warning(
+            "Selecione as colunas de Produto e Quantidade."
+        )
         st.stop()
 
-    # Impedir que uma coluna represente vários campos
-    if len(set(mapeamento.values())) != len(campos):
-        st.error("Cada campo deve utilizar uma coluna diferente.")
+    # Exigir preço unitário ou faturamento total
+    tem_preco = mapeamento["Preco"] != "Selecione uma coluna"
+    tem_faturamento = (
+        mapeamento["Faturamento"] != "Selecione uma coluna"
+    )
+
+    if not tem_preco and not tem_faturamento:
+        st.warning(
+            "Selecione uma coluna de Preço ou Faturamento."
+        )
         st.stop()
+
+
+    
+    # Verificar duplicações apenas entre colunas selecionadas
+    colunas_selecionadas = [
+        coluna
+        for coluna in mapeamento.values()
+        if coluna != "Selecione uma coluna"
+    ]
+
+    if len(set(colunas_selecionadas)) != len(colunas_selecionadas):
+        st.error(
+            "Uma mesma coluna não pode representar "
+            "dois campos diferentes."
+        )
+        st.stop()
+
 
     # Padronizar nomes para os cálculos existentes
+    
     dados = dados.rename(
         columns={
             coluna: campo
             for campo, coluna in mapeamento.items()
+            if coluna != "Selecione uma coluna"
         }
     )
+
 
 
     st.success("Planilha carregada com sucesso!")
@@ -190,31 +225,42 @@ if arquivo is not None:
         st.stop()
 
    
-    for coluna in ["Quantidade", "Preco"]:
+    
+    # Validar quantidade e os campos financeiros disponíveis
+    colunas_numericas = ["Quantidade"]
 
-        if coluna == "Preco":
+    if tem_preco:
+        colunas_numericas.append("Preco")
+
+    if tem_faturamento:
+        colunas_numericas.append("Faturamento")
+
+    for coluna in colunas_numericas:
+
+        if coluna in ["Preco", "Faturamento"]:
             dados[coluna] = dados[coluna].apply(converter_preco)
-
         else:
             dados[coluna] = pd.to_numeric(
                 dados[coluna],
                 errors="coerce"
             )
 
+        nome_exibido = "Preço" if coluna == "Preco" else coluna
 
         if dados[coluna].isna().any():
             st.error(
-                f"A coluna {'Preço' if coluna == 'Preco' else coluna} contém valores vazios "
+                f"A coluna {nome_exibido} contém valores vazios "
                 "ou que não são números válidos."
             )
             st.stop()
 
         if (dados[coluna] < 0).any():
             st.error(
-                f"A coluna {'Preço' if coluna == 'Preco' else coluna} contém valores negativos. "
+                f"A coluna {nome_exibido} contém valores negativos. "
                 "Verifique os dados antes de continuar."
             )
             st.stop()
+
 
     if dados["Quantidade"].sum() == 0:
         st.warning(
@@ -225,7 +271,103 @@ if arquivo is not None:
 
 
     # Calcular o faturamento automaticamente
-    dados["Faturamento"] = dados["Quantidade"] * dados["Preco"]
+    
+    # Determinar a origem do faturamento
+    if tem_faturamento:
+
+        # Utilizar o valor total informado na planilha
+        if tem_preco:
+            faturamento_calculado = (
+                dados["Quantidade"] * dados["Preco"]
+            )
+
+            divergencias = (
+                (dados["Faturamento"] - faturamento_calculado)
+                .abs() > 0.01
+            )
+
+            
+            if divergencias.any():
+                st.warning(
+                    "Foram encontradas divergências entre "
+                    "o faturamento informado e o calculado. "
+                    "Os indicadores utilizarão o faturamento "
+                    "informado na planilha."
+                )
+
+                
+                # Incluir identificação da venda quando disponível
+                colunas_relatorio = [
+                    "Produto", "Quantidade", "Preco", "Faturamento"
+                ]
+
+                
+                # Reconhecer o identificador original da transação
+                reconhecimento_id = identificar_colunas(
+                    dados.columns.tolist()
+                )
+
+                coluna_id = reconhecimento_id["identificadas"].get(
+                    "ID_Venda"
+                )
+
+                if coluna_id is not None:
+                    colunas_relatorio.insert(0, coluna_id)
+
+
+                relatorio_divergencias = dados.loc[
+                    divergencias,
+                    colunas_relatorio
+                ].copy()
+
+
+                relatorio_divergencias["Valor Calculado"] = (
+                    faturamento_calculado.loc[divergencias]
+                )
+
+                relatorio_divergencias["Diferença"] = (
+                    relatorio_divergencias["Faturamento"]
+                    - relatorio_divergencias["Valor Calculado"]
+                )
+
+                relatorio_divergencias = relatorio_divergencias.rename(
+                    columns={
+                        "Preco": "Preço Unitário",
+                        "Faturamento": "Valor Informado"
+                    }
+                )
+
+                st.subheader("⚠️ Vendas com Divergências")
+
+                
+                # Formatar valores monetários para exibição
+                relatorio_exibicao = relatorio_divergencias.copy()
+
+                colunas_monetarias = [
+                    "Preço Unitário",
+                    "Valor Informado",
+                    "Valor Calculado",
+                    "Diferença"
+                ]
+
+                for coluna in colunas_monetarias:
+                    relatorio_exibicao[coluna] = (
+                        relatorio_exibicao[coluna].apply(formatar_reais)
+                    )
+
+
+                st.dataframe(relatorio_exibicao,
+                    use_container_width=True,
+                    
+                )
+
+
+    else:
+        # Calcular quando não existe faturamento informado
+        dados["Faturamento"] = (
+            dados["Quantidade"] * dados["Preco"]
+        )
+
 
     faturamento_total = dados["Faturamento"].sum()
 

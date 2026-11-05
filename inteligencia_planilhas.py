@@ -42,7 +42,20 @@ SINONIMOS = {
         "valor total", "total da venda",
         "total vendido", "valor da venda",
         "sales amount"
+    ],
+    
+    "ID_Venda": [
+        "id venda", "id da venda", "id do pedido",
+        "id pedido", "numero do pedido", "numero pedido",
+        "numero da venda", "numero venda",
+        "codigo da venda", "codigo venda",
+        "codigo do pedido", "codigo pedido",
+        "pedido", "numero transacao", "id transacao",
+        "identificador da venda", "identificador do pedido",
+        "order id", "order number", "sale id",
+        "transaction id"
     ]
+
 }
 
 
