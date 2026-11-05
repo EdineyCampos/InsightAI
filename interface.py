@@ -2,11 +2,43 @@
 import streamlit as st
 import plotly.express as px
 from google import genai
+from inteligencia_planilhas import identificar_colunas, reconhecer_colunas_hibrido
+
 
 
 # Formatar valores no padrão brasileiro
 def formatar_reais(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def converter_preco(valor):
+    """Converte preços brasileiros e internacionais em números."""
+
+    if pd.isna(valor):
+        return None
+
+    if isinstance(valor, (int, float)):
+        return float(valor)
+
+    texto = str(valor).strip()
+    texto = texto.replace("R$", "").replace(" ", "")
+
+    if not texto:
+        return None
+
+    try:
+        if "," in texto and "." in texto:
+            if texto.rfind(",") > texto.rfind("."):
+                texto = texto.replace(".", "").replace(",", ".")
+            else:
+                texto = texto.replace(",", "")
+
+        elif "," in texto:
+            texto = texto.replace(",", ".")
+
+        return float(texto)
+
+    except ValueError:
+        return None
 
 # Configurar a página
 st.set_page_config(
@@ -40,16 +72,157 @@ arquivo = st.file_uploader(
 if arquivo is not None:
     dados = pd.read_excel(arquivo)
     
-    # Limpar análise anterior quando a planilha mudar
+   
+    # Limpar estados anteriores quando a planilha mudar
     if st.session_state.get("arquivo_anterior") != arquivo.getvalue():
         st.session_state["arquivo_anterior"] = arquivo.getvalue()
         st.session_state.pop("analise_ia", None)
+        st.session_state.pop("sugestoes_colunas_ia", None)
+
+        # Reiniciar a seleção das colunas
+        for campo in ["Produto", "Quantidade", "Preco"]:
+            st.session_state.pop(f"mapeamento_{campo}", None)
+
+    # Identificar colunas conhecidas
+    reconhecimento = identificar_colunas(dados.columns.tolist())
+
+    
+    # Reconhecimento inteligente com Gemini
+    if st.button("✨ Identificar colunas com IA"):
+        with st.spinner("O Gemini está analisando as colunas..."):
+            try:
+                reconhecimento_ia = reconhecer_colunas_hibrido(
+                    dados.columns.tolist(),
+                    st.secrets["GEMINI_API_KEY"]
+                )
+
+                st.session_state["sugestoes_colunas_ia"] = (
+                    reconhecimento_ia["colunas"]
+                )
+                
+                # Reiniciar os seletores para aplicar as sugestões
+                for campo in ["Produto", "Quantidade", "Preco"]:
+                    st.session_state.pop(
+                        f"mapeamento_{campo}", None
+                    )
+
+
+                st.success("Análise das colunas concluída!")
+
+            except Exception:
+                st.error(
+                    "Não foi possível consultar a IA. "
+                    "Você pode selecionar as colunas manualmente."
+                )
+
+    st.subheader("🔎 Identificação das colunas")
+
+    st.info(
+        "Confira as colunas identificadas para garantir "
+        "que os cálculos das vendas estejam corretos."
+    )
+
+    campos = ["Produto", "Quantidade", "Preco"]
+    opcoes = ["Selecione uma coluna"] + dados.columns.tolist()
+
+    mapeamento = {}
+
+    for campo in campos:
+        
+        # Priorizar o reconhecimento por regras.
+        # Utilizar a IA para sugerir campos ainda não reconhecidos.
+        sugestao = reconhecimento["identificadas"].get(campo)
+
+        sugestoes_ia = st.session_state.get(
+            "sugestoes_colunas_ia", {}
+        )
+
+        if sugestao is None:
+            coluna_ia = sugestoes_ia.get(campo)
+
+            if (
+                coluna_ia in dados.columns
+                and coluna_ia not in reconhecimento["ambiguas"]
+            ):
+                sugestao = coluna_ia
+
+        indice = (
+            opcoes.index(sugestao)
+            if sugestao in opcoes
+            else 0
+        )
+
+        mapeamento[campo] = st.selectbox(
+            f"Coluna correspondente a {'Preço' if campo == 'Preco' else campo}",
+            options=opcoes,
+            index=indice,
+            key=f"mapeamento_{campo}"
+        )
+
+    # Verificar se todos os campos foram selecionados
+    if "Selecione uma coluna" in mapeamento.values():
+        st.warning("Selecione todas as colunas necessárias.")
+        st.stop()
+
+    # Impedir que uma coluna represente vários campos
+    if len(set(mapeamento.values())) != len(campos):
+        st.error("Cada campo deve utilizar uma coluna diferente.")
+        st.stop()
+
+    # Padronizar nomes para os cálculos existentes
+    dados = dados.rename(
+        columns={
+            coluna: campo
+            for campo, coluna in mapeamento.items()
+        }
+    )
 
 
     st.success("Planilha carregada com sucesso!")
 
     st.subheader("Visualização dos dados")
     st.dataframe(dados, use_container_width=True)
+
+
+    # Validar dados necessários para os cálculos
+    if dados.empty:
+        st.error("A planilha está vazia.")
+        st.stop()
+
+   
+    for coluna in ["Quantidade", "Preco"]:
+
+        if coluna == "Preco":
+            dados[coluna] = dados[coluna].apply(converter_preco)
+
+        else:
+            dados[coluna] = pd.to_numeric(
+                dados[coluna],
+                errors="coerce"
+            )
+
+
+        if dados[coluna].isna().any():
+            st.error(
+                f"A coluna {'Preço' if coluna == 'Preco' else coluna} contém valores vazios "
+                "ou que não são números válidos."
+            )
+            st.stop()
+
+        if (dados[coluna] < 0).any():
+            st.error(
+                f"A coluna {'Preço' if coluna == 'Preco' else coluna} contém valores negativos. "
+                "Verifique os dados antes de continuar."
+            )
+            st.stop()
+
+    if dados["Quantidade"].sum() == 0:
+        st.warning(
+            "Não existem unidades vendidas para calcular "
+            "os indicadores desta planilha."
+        )
+        st.stop()
+
 
     # Calcular o faturamento automaticamente
     dados["Faturamento"] = dados["Quantidade"] * dados["Preco"]
@@ -60,7 +233,13 @@ if arquivo is not None:
    
     # Calcular indicadores
     unidades_vendidas = dados["Quantidade"].sum()
-    receita_media = faturamento_total / unidades_vendidas
+      
+    receita_media = (
+        faturamento_total / unidades_vendidas
+        if unidades_vendidas > 0
+        else 0
+    )
+
 
     # Organizar indicadores em três colunas
     col1, col2, col3 = st.columns(3)
@@ -86,19 +265,39 @@ if arquivo is not None:
     # Criar gráfico de faturamento
     st.subheader("📊 Faturamento por Produto")
 
+   
+    # Somar o faturamento de todas as vendas de cada produto
+    faturamento_produtos = (
+        dados.groupby("Produto", as_index=False)["Faturamento"]
+        .sum()
+        .sort_values("Faturamento", ascending=False)
+    )
+
+    # Criar gráfico com uma barra para cada produto
     grafico = px.bar(
-        dados,
+        faturamento_produtos,
         x="Produto",
         y="Faturamento",
-        title="Análise de Faturamento",
+        title="Faturamento Total por Produto",
         text="Faturamento"
     )
+
+    grafico.update_traces(
+        texttemplate="R$ %{y:,.2f}",
+        textposition="outside"
+    )
+
+    grafico.update_layout(
+        xaxis_title="Produto",
+        yaxis_title="Faturamento (R$)"
+    )
+
 
     st.plotly_chart(grafico, use_container_width=True)
 
     # Identificar produto com maior faturamento
-    indice_maior = dados["Faturamento"].idxmax()
-    produto_destaque = dados.loc[indice_maior]
+    indice_maior = faturamento_produtos["Faturamento"].idxmax()
+    produto_destaque = faturamento_produtos.loc[indice_maior]
 
     st.subheader("🏆 Produto Destaque")
 
