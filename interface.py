@@ -384,10 +384,18 @@ if arquivo is not None:
                 "Coluna": "Preço" if erro["Coluna"] == "Preco" else erro["Coluna"],
                 "Problema": erro["Problema"],
                 "Como corrigir": (
-                "Informe quantas unidades foram vendidas."
-                if erro["Coluna"] == "Quantidade"
-                else "Confira e informe o valor correto na planilha."
-            ),
+                    "Informe quantas unidades foram vendidas."
+                    if erro["Coluna"] == "Quantidade"
+                    and erro["Problema"] == "Valor ausente ou inválido"
+                    else "Confira a quantidade vendida e informe um valor válido."
+                    if erro["Coluna"] == "Quantidade"
+                    else "Informe o preço do produto."
+                    if erro["Coluna"] == "Preco"
+                    and erro["Problema"] == "Valor ausente ou inválido"
+                    else "Confira o preço do produto e informe um valor válido."
+                    if erro["Coluna"] == "Preco"
+                    else "Confira e informe o valor correto na planilha."
+                ),
             }
             for erro in detalhes_erros_financeiros
         ],
