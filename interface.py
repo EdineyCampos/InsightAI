@@ -277,6 +277,33 @@ if arquivo is not None:
         st.success(
             "Nenhum registro completamente duplicado foi encontrado."
         )
+        
+    # Painel resumido de qualidade dos dados
+    st.subheader("📊 Qualidade dos Dados")
+
+    total_registros = len(dados)
+    total_ausencias = int(valores_ausentes.sum())
+
+    col_qual1, col_qual2, col_qual3 = st.columns(3)
+
+    with col_qual1:
+        st.metric(
+            "Registros Analisados",
+            total_registros
+        )
+
+    with col_qual2:
+        st.metric(
+            "Valores Ausentes",
+            total_ausencias
+        )
+
+    with col_qual3:
+        st.metric(
+            "Registros Duplicados",
+            quantidade_duplicados
+        )
+
 
         
     # Permitir tratamento opcional de registros duplicados
@@ -373,6 +400,18 @@ if arquivo is not None:
 
 
     # Mostrar todos os erros encontrados
+
+    
+    # Resumo da validação financeira
+    total_problemas_financeiros = len(detalhes_erros_financeiros)
+
+    st.subheader("💰 Qualidade dos Dados Financeiros")
+
+    st.metric(
+        "Problemas Financeiros Detectados",
+        total_problemas_financeiros
+    )
+
     if erros_financeiros:
         st.error(
             "Foram encontrados problemas nos dados financeiros:"
