@@ -411,6 +411,18 @@ if arquivo is not None:
         "Problemas Financeiros Detectados",
         total_problemas_financeiros
     )
+    
+    # Informar o resultado da validação financeira
+    if total_problemas_financeiros == 0:
+        st.success(
+            "Nenhum problema de validação financeira foi encontrado."
+        )
+    else:
+        st.warning(
+            f"Foram identificados {total_problemas_financeiros} "
+            "problemas financeiros que precisam ser corrigidos."
+        )
+
 
     if erros_financeiros:
         st.error(
