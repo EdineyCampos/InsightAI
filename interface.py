@@ -311,7 +311,7 @@ if arquivo is not None:
     if quantidade_duplicados > 0:
 
         tratar_duplicados = st.checkbox(
-            "Desconsiderar registros completamente duplicados nos cálculos",
+            "Não contar vendas repetidas nos resultados",
             value=False,
             key="tratar_duplicados"
         )
@@ -319,11 +319,20 @@ if arquivo is not None:
         if tratar_duplicados:
             dados = dados.drop_duplicates().copy()
 
+         
+        
+            if quantidade_duplicados == 1:
+                mensagem = "1 venda repetida não foi considerada nos resultados."
+            else:
+                mensagem = (
+                    f"{quantidade_duplicados} vendas repetidas "
+                    "não foram consideradas nos resultados."
+                )
+
             st.info(
-                f"{quantidade_duplicados} registros duplicados "
-                "foram desconsiderados nesta análise. "
-                "A planilha original não foi modificada."
+                f"{mensagem} Sua planilha original continua igual."
             )
+
 
 
    # Mostrar quantas vendas serão utilizadas nos cálculos
