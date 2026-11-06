@@ -818,11 +818,92 @@ if arquivo is not None:
 
     arquivo_excel = BytesIO()
 
-    dados.to_excel(
-        arquivo_excel,
-        index=False,
-        engine="openpyxl"
-    )
+   
+    with pd.ExcelWriter(arquivo_excel, engine="openpyxl") as writer:
+        # Aba com as vendas processadas
+        dados.to_excel(
+            writer,
+            sheet_name="Vendas",
+            index=False
+        )
+
+        # Aba com os principais indicadores
+        resumo_excel = pd.DataFrame({
+            "Indicador": [
+                "Faturamento Total",
+                "Unidades Vendidas",
+                "Receita Média por Unidade"
+            ],
+            "Valor": [
+                formatar_reais(faturamento_total),
+                int(unidades_vendidas),
+                formatar_reais(receita_media)
+            ]
+
+        })
+
+        resumo_excel.to_excel(
+            writer,
+            sheet_name="Resumo",
+            index=False
+        )
+
+        # Resumo do faturamento por produto
+        faturamento_excel = (
+            dados.groupby("Produto", as_index=False)["Faturamento"]
+            .sum()
+        )
+
+        faturamento_excel.to_excel(
+            writer,
+            sheet_name="Resumo",
+            index=False,
+            startrow=6
+        )
+
+        # Criar gráfico simples no Excel
+        from openpyxl.chart import BarChart, Reference
+
+        aba_resumo = writer.sheets["Resumo"]
+        aba_resumo.column_dimensions["A"].width = 30
+        aba_resumo.column_dimensions["B"].width = 22
+
+        from openpyxl.styles import Font, PatternFill
+
+        for celula in aba_resumo[1]:
+            celula.font = Font(bold=True, color="FFFFFF")
+            celula.fill = PatternFill(
+                fill_type="solid",
+                start_color="17365D",
+                end_color="17365D"
+            )
+
+            grafico = BarChart()
+            grafico.title = "Faturamento por Produto"
+            grafico.y_axis.title = "Faturamento (R$)"
+            grafico.x_axis.title = "Produto"
+
+            ultima_linha = 8 + len(faturamento_excel) - 1
+
+            valores = Reference(
+                aba_resumo,
+                min_col=2,
+                min_row=7,
+                max_row=ultima_linha
+            )
+
+            categorias = Reference(
+                aba_resumo,
+                min_col=1,
+                min_row=8,
+                max_row=ultima_linha
+            )
+
+            grafico.add_data(valores, titles_from_data=True)
+            grafico.set_categories(categorias)
+
+            aba_resumo.add_chart(grafico, "D7")
+
 
     st.subheader("📥 Baixar Relatório")
 
