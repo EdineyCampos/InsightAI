@@ -723,7 +723,7 @@ if arquivo is not None:
     with col1:
         st.metric(
             "Faturamento Total",
-            f"R$ {faturamento_total:,.2f}"
+            formatar_reais(faturamento_total)
         )
 
     with col2:
@@ -735,7 +735,7 @@ if arquivo is not None:
     with col3:
         st.metric(
             "Receita Média por Unidade",
-            f"R$ {receita_media:,.2f}"
+            formatar_reais(receita_media)
         )
 
     # Criar gráfico de faturamento
