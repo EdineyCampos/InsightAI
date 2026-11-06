@@ -3,6 +3,7 @@ import streamlit as st
 import plotly.express as px
 from google import genai
 from inteligencia_planilhas import identificar_colunas, reconhecer_colunas_hibrido
+from validacao_financeira import validar_dados_financeiros
 
 
 
@@ -397,11 +398,72 @@ if arquivo is not None:
                     "Coluna": nome_exibido,
                     "Problema": "Valor negativo"
                 })
+        
+    # Comparar a validação antiga com o novo módulo
+    problemas_modulo = validar_dados_financeiros(
+        dados,
+        colunas_numericas
+    )
 
+    # Padronizar e ordenar os resultados para comparação
+    def normalizar_problemas(lista):
+        return sorted(
+            [
+                {
+                    "Linha do Excel": int(item["Linha do Excel"]),
+                    "Coluna": {"Preco": "Preço"}.get(
+                        str(item["Coluna"]).strip(),
+                        str(item["Coluna"]).strip()
+                    ),
+
+                    "Problema": str(item["Problema"]).strip()
+                }
+                for item in lista
+            ],
+            key=lambda item: (
+                item["Linha do Excel"],
+                item["Coluna"],
+                item["Problema"]
+            )
+        )
+
+    problemas_antigos = normalizar_problemas(
+        detalhes_erros_financeiros
+    )
+
+    problemas_novos = normalizar_problemas(
+        problemas_modulo
+    )
+
+    # Exibir a comparação somente após validar todas as colunas
+    
+    
+    if problemas_antigos == problemas_novos:
+        st.success(
+            "As duas validações financeiras apresentam resultados equivalentes."
+        )
+    else:
+        st.warning(
+            "Foram encontradas diferenças entre as validações financeiras."
+        )
+
+        with st.expander("🔎 Comparar resultados das validações"):
+            st.write("Validação atual:")
+            st.dataframe(
+                pd.DataFrame(problemas_antigos),
+                hide_index=True
+            )
+
+            st.write("Novo módulo:")
+            st.dataframe(
+                pd.DataFrame(problemas_novos),
+                hide_index=True
+            )
+        
 
     # Mostrar todos os erros encontrados
 
-    
+
     # Resumo da validação financeira
     total_problemas_financeiros = len(detalhes_erros_financeiros)
 
