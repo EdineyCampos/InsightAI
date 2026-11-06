@@ -383,11 +383,16 @@ if arquivo is not None:
                 "Linha do Excel": int(erro["Linha do Excel"]),
                 "Coluna": "Preço" if erro["Coluna"] == "Preco" else erro["Coluna"],
                 "Problema": erro["Problema"],
+                "Como corrigir": (
+                "Informe quantas unidades foram vendidas."
+                if erro["Coluna"] == "Quantidade"
+                else "Confira e informe o valor correto na planilha."
+            ),
             }
             for erro in detalhes_erros_financeiros
         ],
-        columns=["Linha do Excel", "Coluna", "Problema"]
-    )
+        columns=["Linha do Excel", "Coluna", "Problema", "Como corrigir"]
+        )
 
     st.subheader("💰 Conferência dos valores da planilha")
     total_problemas_financeiros = len(detalhes_erros_financeiros)
