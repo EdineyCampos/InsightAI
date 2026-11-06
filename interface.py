@@ -345,170 +345,55 @@ if arquivo is not None:
     if tem_faturamento:
         colunas_numericas.append("Faturamento")
 
-    erros_financeiros = []
-    detalhes_erros_financeiros = []
-
+    # Converter os dados uma única vez antes da validação.
+    # O módulo independente recebe valores numéricos ou ausentes (NaN).
     for coluna in colunas_numericas:
-
-        # Converter os valores para números
         if coluna in ["Preco", "Faturamento"]:
             dados[coluna] = dados[coluna].apply(converter_preco)
         else:
-            dados[coluna] = pd.to_numeric(
-                dados[coluna],
-                errors="coerce"
-            )
+            dados[coluna] = pd.to_numeric(dados[coluna], errors="coerce")
 
-        nome_exibido = "Preço" if coluna == "Preco" else coluna
-
-        # Verificar valores ausentes ou inválidos
-        if dados[coluna].isna().any():
-            erros_financeiros.append(
-                f"A coluna {nome_exibido} contém valores vazios "
-                "ou que não são números válidos."
-            )
-            
-            # Registrar as linhas com valores ausentes ou inválidos
-            linhas_invalidas = dados.index[
-                dados[coluna].isna()
-            ]
-
-            for indice in linhas_invalidas:
-                detalhes_erros_financeiros.append({
-                    "Linha do Excel": int(indice) + 2,
-                    "Coluna": nome_exibido,
-                    "Problema": "Valor ausente ou inválido"
-                })
-
-
-        # Verificar valores negativos
-        if (dados[coluna] < 0).any():
-            erros_financeiros.append(
-                f"A coluna {nome_exibido} contém valores negativos."
-            )
-            
-            # Registrar as linhas com valores negativos
-            linhas_negativas = dados.index[
-                dados[coluna] < 0
-            ]
-
-            for indice in linhas_negativas:
-                detalhes_erros_financeiros.append({
-                    "Linha do Excel": int(indice) + 2,
-                    "Coluna": nome_exibido,
-                    "Problema": "Valor negativo"
-                })
-        
-    # Comparar a validação antiga com o novo módulo
-    problemas_modulo = validar_dados_financeiros(
+    # Fonte única de validação financeira: módulo testado separadamente.
+    detalhes_erros_financeiros = validar_dados_financeiros(
         dados,
         colunas_numericas
     )
 
-    # Padronizar e ordenar os resultados para comparação
-    def normalizar_problemas(lista):
-        return sorted(
-            [
-                {
-                    "Linha do Excel": int(item["Linha do Excel"]),
-                    "Coluna": {"Preco": "Preço"}.get(
-                        str(item["Coluna"]).strip(),
-                        str(item["Coluna"]).strip()
-                    ),
-
-                    "Problema": str(item["Problema"]).strip()
-                }
-                for item in lista
-            ],
-            key=lambda item: (
-                item["Linha do Excel"],
-                item["Coluna"],
-                item["Problema"]
-            )
-        )
-
-    problemas_antigos = normalizar_problemas(
-        detalhes_erros_financeiros
+    # Traduzir os nomes técnicos apenas para exibição ao usuário.
+    # Não alterar os nomes internos das colunas nem a planilha original.
+    tabela_erros = pd.DataFrame(
+        [
+            {
+                "Linha do Excel": int(erro["Linha do Excel"]),
+                "Coluna": "Preço" if erro["Coluna"] == "Preco" else erro["Coluna"],
+                "Problema": erro["Problema"],
+            }
+            for erro in detalhes_erros_financeiros
+        ],
+        columns=["Linha do Excel", "Coluna", "Problema"]
     )
 
-    problemas_novos = normalizar_problemas(
-        problemas_modulo
-    )
-
-    # Exibir a comparação somente após validar todas as colunas
-    
-    
-    if problemas_antigos == problemas_novos:
-        st.success(
-            "As duas validações financeiras apresentam resultados equivalentes."
-        )
-    else:
-        st.warning(
-            "Foram encontradas diferenças entre as validações financeiras."
-        )
-
-        with st.expander("🔎 Comparar resultados das validações"):
-            st.write("Validação atual:")
-            st.dataframe(
-                pd.DataFrame(problemas_antigos),
-                hide_index=True
-            )
-
-            st.write("Novo módulo:")
-            st.dataframe(
-                pd.DataFrame(problemas_novos),
-                hide_index=True
-            )
-        
-
-    # Mostrar todos os erros encontrados
-
-
-    # Resumo da validação financeira
+    st.subheader("💰 Conferência dos valores da planilha")
     total_problemas_financeiros = len(detalhes_erros_financeiros)
+    st.metric("Informações que precisam de atenção", total_problemas_financeiros)
 
-    st.subheader("💰 Qualidade dos Dados Financeiros")
-
-    st.metric(
-        "Problemas Financeiros Detectados",
-        total_problemas_financeiros
-    )
-    
-    # Informar o resultado da validação financeira
     if total_problemas_financeiros == 0:
-        st.success(
-            "Nenhum problema de validação financeira foi encontrado."
-        )
+        st.success("Os valores de quantidade, preço e faturamento foram conferidos.")
     else:
         st.warning(
-            f"Foram identificados {total_problemas_financeiros} "
-            "problemas financeiros que precisam ser corrigidos."
+            f"Encontramos {total_problemas_financeiros} informação(ões) "
+            "que precisam ser corrigidas antes de continuar."
         )
-
-
-    if erros_financeiros:
-        st.error(
-            "Foram encontrados problemas nos dados financeiros:"
+        st.subheader("🔎 O que você precisa corrigir?")
+        st.dataframe(
+            tabela_erros,
+            use_container_width=True,
+            hide_index=True
         )
-
-        for erro in erros_financeiros:
-            st.error(erro)
-            
-        # Mostrar localização dos problemas encontrados
-        if detalhes_erros_financeiros:
-            st.subheader("🔎 Localização dos Problemas")
-
-            tabela_erros = pd.DataFrame(
-                detalhes_erros_financeiros
-            )
-
-            st.dataframe(
-                tabela_erros,
-                use_container_width=True,
-                hide_index=True
-            )
-
-
+        st.info(
+            "Abra a planilha, corrija os valores nas linhas indicadas, "
+            "salve o arquivo e envie novamente."
+        )
         st.stop()
 
 
