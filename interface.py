@@ -976,16 +976,78 @@ if arquivo is not None:
                     "Verifique sua conexão ou tente novamente mais tarde."
                 )
 
+    # Gerar PDF com a análise da inteligência artificial
+    def gerar_pdf_analise(texto):
+        from io import BytesIO
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer
+        )
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.enums import TA_LEFT
+        from reportlab.lib import colors
+        from xml.sax.saxutils import escape
+        import re
+
+        arquivo_pdf = BytesIO()
+
+        documento = SimpleDocTemplate(
+            arquivo_pdf,
+            pagesize=(595.28, 841.89),
+            rightMargin=45,
+            leftMargin=45,
+            topMargin=45,
+            bottomMargin=45
+        )
+
+        estilos = getSampleStyleSheet()
+        estilo = estilos["BodyText"].clone("AnaliseInsightAI")
+        estilo.fontSize = 10
+        estilo.leading = 15
+        estilo.alignment = TA_LEFT
+        estilo.spaceAfter = 8
+
+        conteudo = []
+
+        titulo = Paragraph(
+            "InsightAI - Analise Inteligente de Vendas",
+            estilos["Title"]
+        )
+        conteudo.append(titulo)
+        conteudo.append(Spacer(1, 20))
+
+        for linha in texto.splitlines():
+            linha = linha.strip()
+
+            if not linha:
+                conteudo.append(Spacer(1, 8))
+                continue
+
+            # Remover marcadores Markdown sem alterar o conteúdo
+            linha = re.sub(r"^#{1,6}\s*", "", linha)
+            linha = re.sub(r"\*\*(.*?)\*\*", r"\1", linha)
+            linha = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", linha)
+
+            conteudo.append(
+                Paragraph(escape(linha), estilo)
+            )
+
+        documento.build(conteudo)
+        arquivo_pdf.seek(0)
+
+        return arquivo_pdf.getvalue()
+
     if "analise_ia" in st.session_state:
         
         texto_analise = st.session_state["analise_ia"]
         texto_analise = texto_analise.replace("R$", "R\\$")
         st.markdown(texto_analise)
         
+       
         st.download_button(
-            label="📥 Baixar análise da IA",
-            data=st.session_state["analise_ia"],
-            file_name="analise_insightai.md",
-            mime="text/markdown"
+            label="📥 Baixar análise da IA em PDF",
+            data=gerar_pdf_analise(st.session_state["analise_ia"]),
+            file_name="analise_insightai.pdf",
+            mime="application/pdf"
         )
+
 
