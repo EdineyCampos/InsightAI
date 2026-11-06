@@ -285,11 +285,11 @@ if arquivo is not None:
     total_registros = len(dados)
     total_ausencias = int(valores_ausentes.sum())
 
-    col_qual1, col_qual2, col_qual3 = st.columns(3)
+    col_qual1, col_qual2, col_qual3, col_qual4 = st.columns(4)
 
     with col_qual1:
         st.metric(
-            "Registros Analisados",
+            "Vendas Recebidas",
             total_registros
         )
 
@@ -301,7 +301,7 @@ if arquivo is not None:
 
     with col_qual3:
         st.metric(
-            "Registros Duplicados",
+            "Vendas Repetidas",
             quantidade_duplicados
         )
 
@@ -325,6 +325,13 @@ if arquivo is not None:
                 "A planilha original não foi modificada."
             )
 
+
+   # Mostrar quantas vendas serão utilizadas nos cálculos
+    with col_qual4:
+        st.metric(
+            "Vendas usadas nos cálculos",
+            len(dados)
+    )
 
 
 
