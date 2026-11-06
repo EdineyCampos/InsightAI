@@ -318,6 +318,7 @@ if arquivo is not None:
         colunas_numericas.append("Faturamento")
 
     erros_financeiros = []
+    detalhes_erros_financeiros = []
 
     for coluna in colunas_numericas:
 
@@ -338,12 +339,38 @@ if arquivo is not None:
                 f"A coluna {nome_exibido} contém valores vazios "
                 "ou que não são números válidos."
             )
+            
+            # Registrar as linhas com valores ausentes ou inválidos
+            linhas_invalidas = dados.index[
+                dados[coluna].isna()
+            ]
+
+            for indice in linhas_invalidas:
+                detalhes_erros_financeiros.append({
+                    "Linha do Excel": int(indice) + 2,
+                    "Coluna": nome_exibido,
+                    "Problema": "Valor ausente ou inválido"
+                })
+
 
         # Verificar valores negativos
         if (dados[coluna] < 0).any():
             erros_financeiros.append(
                 f"A coluna {nome_exibido} contém valores negativos."
             )
+            
+            # Registrar as linhas com valores negativos
+            linhas_negativas = dados.index[
+                dados[coluna] < 0
+            ]
+
+            for indice in linhas_negativas:
+                detalhes_erros_financeiros.append({
+                    "Linha do Excel": int(indice) + 2,
+                    "Coluna": nome_exibido,
+                    "Problema": "Valor negativo"
+                })
+
 
     # Mostrar todos os erros encontrados
     if erros_financeiros:
@@ -353,6 +380,21 @@ if arquivo is not None:
 
         for erro in erros_financeiros:
             st.error(erro)
+            
+        # Mostrar localização dos problemas encontrados
+        if detalhes_erros_financeiros:
+            st.subheader("🔎 Localização dos Problemas")
+
+            tabela_erros = pd.DataFrame(
+                detalhes_erros_financeiros
+            )
+
+            st.dataframe(
+                tabela_erros,
+                use_container_width=True,
+                hide_index=True
+            )
+
 
         st.stop()
 
