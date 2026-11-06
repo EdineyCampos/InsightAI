@@ -2,11 +2,44 @@
 import streamlit as st
 import plotly.express as px
 from google import genai
+from inteligencia_planilhas import identificar_colunas, reconhecer_colunas_hibrido
+from validacao_financeira import validar_dados_financeiros
+
 
 
 # Formatar valores no padrão brasileiro
 def formatar_reais(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def converter_preco(valor):
+    """Converte preços brasileiros e internacionais em números."""
+
+    if pd.isna(valor):
+        return None
+
+    if isinstance(valor, (int, float)):
+        return float(valor)
+
+    texto = str(valor).strip()
+    texto = texto.replace("R$", "").replace(" ", "")
+
+    if not texto:
+        return None
+
+    try:
+        if "," in texto and "." in texto:
+            if texto.rfind(",") > texto.rfind("."):
+                texto = texto.replace(".", "").replace(",", ".")
+            else:
+                texto = texto.replace(",", "")
+
+        elif "," in texto:
+            texto = texto.replace(",", ".")
+
+        return float(texto)
+
+    except ValueError:
+        return None
 
 # Configurar a página
 st.set_page_config(
@@ -40,19 +73,664 @@ arquivo = st.file_uploader(
 if arquivo is not None:
     dados = pd.read_excel(arquivo)
     
-    # Limpar análise anterior quando a planilha mudar
+   
+    # Limpar estados anteriores quando a planilha mudar
     if st.session_state.get("arquivo_anterior") != arquivo.getvalue():
         st.session_state["arquivo_anterior"] = arquivo.getvalue()
         st.session_state.pop("analise_ia", None)
+        st.session_state.pop("sugestoes_colunas_ia", None)
+        
+        # Limpar a escolha do identificador ao trocar de planilha
+        st.session_state.pop("identificador_transacao", None)
+        
+        # Reiniciar tratamento de duplicações ao trocar de planilha
+        st.session_state.pop("tratar_duplicados", None)
+
+
+
+        # Reiniciar a seleção das colunas
+        for campo in ["Produto", "Quantidade", "Preco", "Faturamento"]:
+            st.session_state.pop(f"mapeamento_{campo}", None)
+
+    # Identificar colunas conhecidas
+    reconhecimento = identificar_colunas(dados.columns.tolist())
+
+    
+    # Reconhecimento inteligente com Gemini
+    if st.button("✨ Identificar colunas com IA"):
+        with st.spinner("O Gemini está analisando as colunas..."):
+            try:
+                reconhecimento_ia = reconhecer_colunas_hibrido(
+                    dados.columns.tolist(),
+                    st.secrets["GEMINI_API_KEY"]
+                )
+
+                st.session_state["sugestoes_colunas_ia"] = (
+                    reconhecimento_ia["colunas"]
+                )
+                
+                # Reiniciar os seletores para aplicar as sugestões
+                for campo in ["Produto", "Quantidade", "Preco", "Faturamento"]:
+                    st.session_state.pop(
+                        f"mapeamento_{campo}", None
+                    )
+
+
+                st.success("Análise das colunas concluída!")
+
+            except Exception:
+                st.error(
+                    "Não foi possível consultar a IA. "
+                    "Você pode selecionar as colunas manualmente."
+                )
+
+    st.subheader("🔎 Identificação das colunas")
+
+    st.info(
+        "Confira as colunas identificadas para garantir "
+        "que os cálculos das vendas estejam corretos."
+    )
+
+    campos = ["Produto", "Quantidade", "Preco", "Faturamento"]
+    opcoes = ["Selecione uma coluna"] + dados.columns.tolist()
+
+    mapeamento = {}
+
+    for campo in campos:
+        
+        # Priorizar o reconhecimento por regras.
+        # Utilizar a IA para sugerir campos ainda não reconhecidos.
+        sugestao = reconhecimento["identificadas"].get(campo)
+
+        sugestoes_ia = st.session_state.get(
+            "sugestoes_colunas_ia", {}
+        )
+
+        if sugestao is None:
+            coluna_ia = sugestoes_ia.get(campo)
+
+            if (
+                coluna_ia in dados.columns
+                and coluna_ia not in reconhecimento["ambiguas"]
+            ):
+                sugestao = coluna_ia
+
+        indice = (
+            opcoes.index(sugestao)
+            if sugestao in opcoes
+            else 0
+        )
+
+        mapeamento[campo] = st.selectbox(
+            f"Coluna correspondente a {'Preço' if campo == 'Preco' else campo}",
+            options=opcoes,
+            index=indice,
+            key=f"mapeamento_{campo}"
+        )
+
+    
+    # Verificar os campos obrigatórios
+    obrigatorios = ["Produto", "Quantidade"]
+
+    if any(
+        mapeamento[campo] == "Selecione uma coluna"
+        for campo in obrigatorios
+    ):
+        st.warning(
+            "Selecione as colunas de Produto e Quantidade."
+        )
+        st.stop()
+
+    # Exigir preço unitário ou faturamento total
+    tem_preco = mapeamento["Preco"] != "Selecione uma coluna"
+    tem_faturamento = (
+        mapeamento["Faturamento"] != "Selecione uma coluna"
+    )
+
+    if not tem_preco and not tem_faturamento:
+        st.warning(
+            "Selecione uma coluna de Preço ou Faturamento."
+        )
+        st.stop()
+
+
+    
+    # Verificar duplicações apenas entre colunas selecionadas
+    colunas_selecionadas = [
+        coluna
+        for coluna in mapeamento.values()
+        if coluna != "Selecione uma coluna"
+    ]
+
+    if len(set(colunas_selecionadas)) != len(colunas_selecionadas):
+        st.error(
+            "Uma mesma coluna não pode representar "
+            "dois campos diferentes."
+        )
+        st.stop()
+
+
+    # Padronizar nomes para os cálculos existentes
+    
+    dados = dados.rename(
+        columns={
+            coluna: campo
+            for campo, coluna in mapeamento.items()
+            if coluna != "Selecione uma coluna"
+        }
+    )
+
 
 
     st.success("Planilha carregada com sucesso!")
 
     st.subheader("Visualização dos dados")
     st.dataframe(dados, use_container_width=True)
+    
+    # Identificar valores ausentes na planilha
+    valores_ausentes = dados.isna().sum()
+
+    colunas_com_ausencias = valores_ausentes[
+        valores_ausentes > 0
+    ]
+
+    if not colunas_com_ausencias.empty:
+        st.warning(
+            "Foram encontrados valores ausentes na planilha. "
+            "Confira as colunas afetadas antes de continuar."
+        )
+
+        resumo_ausencias = colunas_com_ausencias.reset_index()
+        resumo_ausencias.columns = [
+            "Coluna",
+            "Valores Ausentes"
+        ]
+
+        with st.expander("🔎 Visualizar valores ausentes"):
+            st.dataframe(
+                resumo_ausencias,
+                use_container_width=True
+            )
+    else:
+        st.success(
+            "Nenhum valor ausente foi encontrado na planilha."
+        )
+
+    # Verificar registros completamente duplicados
+    quantidade_duplicados = int(dados.duplicated().sum())
+
+    if quantidade_duplicados > 0:
+        st.warning(
+            f"Foram encontrados {quantidade_duplicados} "
+            "registros completamente duplicados na planilha."
+        )
+
+        registros_duplicados = dados[
+            dados.duplicated(keep=False)
+        ]
+
+        with st.expander("🔎 Visualizar registros duplicados"):
+            st.dataframe(
+                registros_duplicados,
+                use_container_width=True
+            )
+    else:
+        st.success(
+            "Nenhum registro completamente duplicado foi encontrado."
+        )
+        
+    # Painel resumido de qualidade dos dados
+    st.subheader("📊 Qualidade dos Dados")
+
+    total_registros = len(dados)
+    total_ausencias = int(valores_ausentes.sum())
+
+    col_qual1, col_qual2, col_qual3, col_qual4 = st.columns(4)
+
+    with col_qual1:
+        st.metric(
+            "Vendas Recebidas",
+            total_registros
+        )
+
+    with col_qual2:
+        st.metric(
+            "Valores Ausentes",
+            total_ausencias
+        )
+
+    with col_qual3:
+        st.metric(
+            "Vendas Repetidas",
+            quantidade_duplicados
+        )
+
+
+        
+    # Permitir tratamento opcional de registros duplicados
+    if quantidade_duplicados > 0:
+
+        tratar_duplicados = st.checkbox(
+            "Não contar vendas repetidas nos resultados",
+            value=False,
+            key="tratar_duplicados"
+        )
+
+        if tratar_duplicados:
+            dados = dados.drop_duplicates().copy()
+
+         
+        
+            if quantidade_duplicados == 1:
+                mensagem = "1 venda repetida não foi considerada nos resultados."
+            else:
+                mensagem = (
+                    f"{quantidade_duplicados} vendas repetidas "
+                    "não foram consideradas nos resultados."
+                )
+
+            st.info(
+                f"{mensagem} Sua planilha original continua igual."
+            )
+
+
+
+   # Mostrar quantas vendas serão utilizadas nos cálculos
+    with col_qual4:
+        st.metric(
+            "Vendas usadas nos cálculos",
+            len(dados)
+    )
+
+
+
+    # Validar dados necessários para os cálculos
+    if dados.empty:
+        st.error("A planilha está vazia.")
+        st.stop()
+
+   
+    
+    
+    # Validar quantidade e os campos financeiros disponíveis
+    colunas_numericas = ["Quantidade"]
+
+    if tem_preco:
+        colunas_numericas.append("Preco")
+
+    if tem_faturamento:
+        colunas_numericas.append("Faturamento")
+
+    # Converter os dados uma única vez antes da validação.
+    # O módulo independente recebe valores numéricos ou ausentes (NaN).
+    for coluna in colunas_numericas:
+        if coluna in ["Preco", "Faturamento"]:
+            dados[coluna] = dados[coluna].apply(converter_preco)
+        else:
+            dados[coluna] = pd.to_numeric(dados[coluna], errors="coerce")
+
+    # Fonte única de validação financeira: módulo testado separadamente.
+    detalhes_erros_financeiros = validar_dados_financeiros(
+        dados,
+        colunas_numericas
+    )
+
+    # Traduzir os nomes técnicos apenas para exibição ao usuário.
+    # Não alterar os nomes internos das colunas nem a planilha original.
+    tabela_erros = pd.DataFrame(
+        [
+            {
+                "Linha do Excel": int(erro["Linha do Excel"]),
+                "Coluna": "Preço" if erro["Coluna"] == "Preco" else erro["Coluna"],
+                "Problema": erro["Problema"],
+                "Como corrigir": (
+                    "Informe quantas unidades foram vendidas."
+                    if erro["Coluna"] == "Quantidade"
+                    and erro["Problema"] == "Valor ausente ou inválido"
+                    else "Confira a quantidade vendida e informe um valor válido."
+                    if erro["Coluna"] == "Quantidade"
+                    else "Informe o preço do produto."
+                    if erro["Coluna"] == "Preco"
+                    and erro["Problema"] == "Valor ausente ou inválido"
+                    else "Confira o preço do produto e informe um valor válido."
+                    if erro["Coluna"] == "Preco"
+                    else "Confira e informe o valor correto na planilha."
+                ),
+            }
+            for erro in detalhes_erros_financeiros
+        ],
+        columns=["Linha do Excel", "Coluna", "Problema", "Como corrigir"]
+        )
+
+    st.subheader("💰 Conferência dos valores da planilha")
+    total_problemas_financeiros = len(detalhes_erros_financeiros)
+    st.metric("Informações que precisam de atenção", total_problemas_financeiros)
+
+    if total_problemas_financeiros == 0:
+        st.success("Os valores de quantidade, preço e faturamento foram conferidos.")
+    else:
+        st.warning(
+            f"Encontramos {total_problemas_financeiros} informação(ões) "
+            "que precisam ser corrigidas antes de continuar."
+        )
+        st.subheader("🔎 O que você precisa corrigir?")
+        st.dataframe(
+            tabela_erros,
+            use_container_width=True,
+            hide_index=True
+        )
+        st.info(
+            "Abra a planilha, corrija os valores nas linhas indicadas, "
+            "salve o arquivo e envie novamente."
+        )
+        st.stop()
+
+
+    if dados["Quantidade"].sum() == 0:
+        st.warning(
+            "Não existem unidades vendidas para calcular "
+            "os indicadores desta planilha."
+        )
+        st.stop()
+
 
     # Calcular o faturamento automaticamente
-    dados["Faturamento"] = dados["Quantidade"] * dados["Preco"]
+    
+    # Determinar a origem do faturamento
+    if tem_faturamento:
+
+        # Utilizar o valor total informado na planilha
+        if tem_preco:
+            faturamento_calculado = (
+                dados["Quantidade"] * dados["Preco"]
+            )
+
+            divergencias = (
+                (dados["Faturamento"] - faturamento_calculado)
+                .abs() > 0.01
+            )
+
+            
+            if divergencias.any():
+                st.warning(
+                    "Foram encontradas divergências entre "
+                    "o faturamento informado e o calculado. "
+                    "Os indicadores utilizarão o faturamento "
+                    "informado na planilha."
+                )
+
+                # Resumo das divergências financeiras
+                quantidade_divergencias = int(divergencias.sum())
+
+                total_vendas = len(dados)
+
+                diferenca_absoluta_total = (
+                    dados.loc[divergencias, "Faturamento"]
+                    - faturamento_calculado.loc[divergencias]
+                ).abs().sum()
+                
+                # Separar divergências positivas e negativas
+                diferencas_financeiras = (
+                    dados.loc[divergencias, "Faturamento"]
+                    - faturamento_calculado.loc[divergencias]
+                )
+
+                total_acima = (
+                    diferencas_financeiras[
+                        diferencas_financeiras > 0
+                    ].sum()
+                )
+
+                total_abaixo = abs(
+                    diferencas_financeiras[
+                        diferencas_financeiras < 0
+                    ].sum()
+                )
+
+
+                st.subheader("📊 Resumo das Divergências")
+
+                col_div1, col_div2, col_div3, col_div4 = st.columns(4)
+
+                with col_div1:
+                    st.metric(
+                        "Vendas com Divergências",
+                        quantidade_divergencias
+                    )
+
+                with col_div2:
+                    st.metric(
+                        "Diferença Absoluta Total",
+                        formatar_reais(diferenca_absoluta_total)
+                    )
+
+                with col_div3:
+                    st.metric(
+                        "Vendas Analisadas",
+                        total_vendas
+                    )
+                
+                # Percentual de vendas com divergências
+                percentual_divergencias = (
+                    quantidade_divergencias / total_vendas * 100
+                    if total_vendas > 0
+                    else 0
+                )
+
+                with col_div4:
+                    st.metric(
+                        "Percentual de Divergências",
+                        f"{percentual_divergencias:.1f}%".replace(".", ",")
+                    )
+
+                    
+                # Indicadores por direção da divergência
+                col_acima, col_abaixo = st.columns(2)
+
+                with col_acima:
+                    st.metric(
+                        "📈 Valores Acima do Esperado",
+                        formatar_reais(total_acima)
+                    )
+
+                with col_abaixo:
+                    st.metric(
+                        "📉 Valores Abaixo do Esperado",
+                        formatar_reais(total_abaixo)
+                    )
+
+
+
+                
+                # Incluir identificação da venda quando disponível
+                colunas_relatorio = [
+                    "Produto", "Quantidade", "Preco", "Faturamento"
+                ]
+
+                
+                # Reconhecer o identificador original da transação
+                reconhecimento_id = identificar_colunas(
+                    dados.columns.tolist()
+                )
+
+               
+                coluna_id = reconhecimento_id["identificadas"].get(
+                    "ID_Venda"
+                )
+
+                # Identificar possíveis colunas de transações ambíguas
+                from inteligencia_planilhas import normalizar_nome, SINONIMOS
+
+                nomes_id = {
+                    normalizar_nome(nome)
+                    for nome in SINONIMOS["ID_Venda"]
+                }
+
+                candidatas_id = [
+                    coluna
+                    for coluna in dados.columns
+                    if normalizar_nome(coluna) in nomes_id
+                ]
+
+                if len(candidatas_id) > 1:
+                    st.warning(
+                        "Foram encontradas várias colunas que podem "
+                        "identificar uma venda. Escolha a correta."
+                    )
+
+                    coluna_id = st.selectbox(
+                        "Identificador da transação",
+                        options=candidatas_id,
+                        key="identificador_transacao"
+                    )
+
+                elif len(candidatas_id) == 1:
+                    coluna_id = candidatas_id[0]
+
+                if coluna_id is not None:
+                    colunas_relatorio.insert(0, coluna_id)
+
+
+
+                relatorio_divergencias = dados.loc[
+                    divergencias,
+                    colunas_relatorio
+                ].copy()
+
+
+                relatorio_divergencias["Valor Calculado"] = (
+                    faturamento_calculado.loc[divergencias]
+                )
+
+                relatorio_divergencias["Diferença"] = (
+                    relatorio_divergencias["Faturamento"]
+                    - relatorio_divergencias["Valor Calculado"]
+                )
+
+                relatorio_divergencias = relatorio_divergencias.rename(
+                    columns={
+                        "Preco": "Preço Unitário",
+                        "Faturamento": "Valor Informado"
+                    }
+                )
+
+                st.subheader("⚠️ Vendas com Divergências")
+
+                
+                # Formatar valores monetários para exibição
+                relatorio_exibicao = relatorio_divergencias.copy()
+
+                colunas_monetarias = [
+                    "Preço Unitário",
+                    "Valor Informado",
+                    "Valor Calculado",
+                    "Diferença"
+                ]
+
+                for coluna in colunas_monetarias:
+                    relatorio_exibicao[coluna] = (
+                        relatorio_exibicao[coluna].apply(formatar_reais)
+                    )
+
+
+                st.dataframe(relatorio_exibicao,
+                    use_container_width=True,
+                    
+                )
+
+
+                # Exportar divergências em Excel
+                from io import BytesIO
+
+                arquivo_divergencias = BytesIO()
+
+                
+                with pd.ExcelWriter(
+                    arquivo_divergencias,
+                    engine="openpyxl"
+                ) as writer:
+
+                    relatorio_divergencias.to_excel(
+                        writer,
+                        index=False,
+                        sheet_name="Divergencias"
+                    )
+
+                    planilha = writer.sheets["Divergencias"]
+
+                    from openpyxl.styles import Font, PatternFill, Alignment
+                    from openpyxl.utils import get_column_letter
+
+                    # Destacar cabeçalhos
+                    for celula in planilha[1]:
+                        celula.font = Font(
+                            bold=True,
+                            color="FFFFFF"
+                        )
+                        celula.fill = PatternFill(
+                            start_color="17365D",
+                            end_color="17365D",
+                            fill_type="solid"
+                        )
+                        celula.alignment = Alignment(
+                            horizontal="center"
+                        )
+
+                    # Ajustar largura das colunas
+                    for coluna in planilha.columns:
+                        maior_tamanho = max(
+                            len(str(celula.value))
+                            if celula.value is not None else 0
+                            for celula in coluna
+                        )
+
+                        letra = get_column_letter(coluna[0].column)
+
+                        planilha.column_dimensions[letra].width = min(
+                            maior_tamanho + 4,
+                            40
+                        )
+
+                    # Formatar valores monetários
+                    colunas_monetarias_excel = [
+                        "Preço Unitário",
+                        "Valor Informado",
+                        "Valor Calculado",
+                        "Diferença"
+                    ]
+
+                    for indice, celula in enumerate(planilha[1], start=1):
+                        if celula.value in colunas_monetarias_excel:
+                            for linha in range(2, planilha.max_row + 1):
+                                planilha.cell(
+                                    row=linha,
+                                    column=indice
+                                ).number_format = '"R$" #,##0.00'
+
+                    # Manter cabeçalho visível ao rolar
+                    planilha.freeze_panes = "A2"
+
+                    # Habilitar filtros
+                    planilha.auto_filter.ref = planilha.dimensions
+
+
+                st.download_button(
+                    label="📥 Baixar Relatório de Divergências",
+                    data=arquivo_divergencias.getvalue(),
+                    file_name="relatorio_divergencias.xlsx",
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "spreadsheetml.sheet"
+                    ),
+                    key="download_divergencias"
+                )
+
+    else:
+        # Calcular quando não existe faturamento informado
+        dados["Faturamento"] = (
+            dados["Quantidade"] * dados["Preco"]
+        )
+
 
     faturamento_total = dados["Faturamento"].sum()
 
@@ -60,7 +738,13 @@ if arquivo is not None:
    
     # Calcular indicadores
     unidades_vendidas = dados["Quantidade"].sum()
-    receita_media = faturamento_total / unidades_vendidas
+      
+    receita_media = (
+        faturamento_total / unidades_vendidas
+        if unidades_vendidas > 0
+        else 0
+    )
+
 
     # Organizar indicadores em três colunas
     col1, col2, col3 = st.columns(3)
@@ -68,7 +752,7 @@ if arquivo is not None:
     with col1:
         st.metric(
             "Faturamento Total",
-            f"R$ {faturamento_total:,.2f}"
+            formatar_reais(faturamento_total)
         )
 
     with col2:
@@ -80,25 +764,45 @@ if arquivo is not None:
     with col3:
         st.metric(
             "Receita Média por Unidade",
-            f"R$ {receita_media:,.2f}"
+            formatar_reais(receita_media)
         )
 
     # Criar gráfico de faturamento
     st.subheader("📊 Faturamento por Produto")
 
+   
+    # Somar o faturamento de todas as vendas de cada produto
+    faturamento_produtos = (
+        dados.groupby("Produto", as_index=False)["Faturamento"]
+        .sum()
+        .sort_values("Faturamento", ascending=False)
+    )
+
+    # Criar gráfico com uma barra para cada produto
     grafico = px.bar(
-        dados,
+        faturamento_produtos,
         x="Produto",
         y="Faturamento",
-        title="Análise de Faturamento",
+        title="Faturamento Total por Produto",
         text="Faturamento"
     )
+
+    grafico.update_traces(
+        texttemplate="R$ %{y:,.2f}",
+        textposition="outside"
+    )
+
+    grafico.update_layout(
+        xaxis_title="Produto",
+        yaxis_title="Faturamento (R$)"
+    )
+
 
     st.plotly_chart(grafico, use_container_width=True)
 
     # Identificar produto com maior faturamento
-    indice_maior = dados["Faturamento"].idxmax()
-    produto_destaque = dados.loc[indice_maior]
+    indice_maior = faturamento_produtos["Faturamento"].idxmax()
+    produto_destaque = faturamento_produtos.loc[indice_maior]
 
     st.subheader("🏆 Produto Destaque")
 
@@ -114,11 +818,92 @@ if arquivo is not None:
 
     arquivo_excel = BytesIO()
 
-    dados.to_excel(
-        arquivo_excel,
-        index=False,
-        engine="openpyxl"
-    )
+   
+    with pd.ExcelWriter(arquivo_excel, engine="openpyxl") as writer:
+        # Aba com as vendas processadas
+        dados.to_excel(
+            writer,
+            sheet_name="Vendas",
+            index=False
+        )
+
+        # Aba com os principais indicadores
+        resumo_excel = pd.DataFrame({
+            "Indicador": [
+                "Faturamento Total",
+                "Unidades Vendidas",
+                "Receita Média por Unidade"
+            ],
+            "Valor": [
+                formatar_reais(faturamento_total),
+                int(unidades_vendidas),
+                formatar_reais(receita_media)
+            ]
+
+        })
+
+        resumo_excel.to_excel(
+            writer,
+            sheet_name="Resumo",
+            index=False
+        )
+
+        # Resumo do faturamento por produto
+        faturamento_excel = (
+            dados.groupby("Produto", as_index=False)["Faturamento"]
+            .sum()
+        )
+
+        faturamento_excel.to_excel(
+            writer,
+            sheet_name="Resumo",
+            index=False,
+            startrow=6
+        )
+
+        # Criar gráfico simples no Excel
+        from openpyxl.chart import BarChart, Reference
+
+        aba_resumo = writer.sheets["Resumo"]
+        aba_resumo.column_dimensions["A"].width = 30
+        aba_resumo.column_dimensions["B"].width = 22
+
+        from openpyxl.styles import Font, PatternFill
+
+        for celula in aba_resumo[1]:
+            celula.font = Font(bold=True, color="FFFFFF")
+            celula.fill = PatternFill(
+                fill_type="solid",
+                start_color="17365D",
+                end_color="17365D"
+            )
+
+            grafico = BarChart()
+            grafico.title = "Faturamento por Produto"
+            grafico.y_axis.title = "Faturamento (R$)"
+            grafico.x_axis.title = "Produto"
+
+            ultima_linha = 8 + len(faturamento_excel) - 1
+
+            valores = Reference(
+                aba_resumo,
+                min_col=2,
+                min_row=7,
+                max_row=ultima_linha
+            )
+
+            categorias = Reference(
+                aba_resumo,
+                min_col=1,
+                min_row=8,
+                max_row=ultima_linha
+            )
+
+            grafico.add_data(valores, titles_from_data=True)
+            grafico.set_categories(categorias)
+
+            aba_resumo.add_chart(grafico, "D7")
+
 
     st.subheader("📥 Baixar Relatório")
 
@@ -191,16 +976,78 @@ if arquivo is not None:
                     "Verifique sua conexão ou tente novamente mais tarde."
                 )
 
+    # Gerar PDF com a análise da inteligência artificial
+    def gerar_pdf_analise(texto):
+        from io import BytesIO
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer
+        )
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.enums import TA_LEFT
+        from reportlab.lib import colors
+        from xml.sax.saxutils import escape
+        import re
+
+        arquivo_pdf = BytesIO()
+
+        documento = SimpleDocTemplate(
+            arquivo_pdf,
+            pagesize=(595.28, 841.89),
+            rightMargin=45,
+            leftMargin=45,
+            topMargin=45,
+            bottomMargin=45
+        )
+
+        estilos = getSampleStyleSheet()
+        estilo = estilos["BodyText"].clone("AnaliseInsightAI")
+        estilo.fontSize = 10
+        estilo.leading = 15
+        estilo.alignment = TA_LEFT
+        estilo.spaceAfter = 8
+
+        conteudo = []
+
+        titulo = Paragraph(
+            "InsightAI - Analise Inteligente de Vendas",
+            estilos["Title"]
+        )
+        conteudo.append(titulo)
+        conteudo.append(Spacer(1, 20))
+
+        for linha in texto.splitlines():
+            linha = linha.strip()
+
+            if not linha:
+                conteudo.append(Spacer(1, 8))
+                continue
+
+            # Remover marcadores Markdown sem alterar o conteúdo
+            linha = re.sub(r"^#{1,6}\s*", "", linha)
+            linha = re.sub(r"\*\*(.*?)\*\*", r"\1", linha)
+            linha = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", linha)
+
+            conteudo.append(
+                Paragraph(escape(linha), estilo)
+            )
+
+        documento.build(conteudo)
+        arquivo_pdf.seek(0)
+
+        return arquivo_pdf.getvalue()
+
     if "analise_ia" in st.session_state:
         
         texto_analise = st.session_state["analise_ia"]
         texto_analise = texto_analise.replace("R$", "R\\$")
         st.markdown(texto_analise)
         
+       
         st.download_button(
-            label="📥 Baixar análise da IA",
-            data=st.session_state["analise_ia"],
-            file_name="analise_insightai.md",
-            mime="text/markdown"
+            label="📥 Baixar análise da IA em PDF",
+            data=gerar_pdf_analise(st.session_state["analise_ia"]),
+            file_name="analise_insightai.pdf",
+            mime="application/pdf"
         )
+
 
